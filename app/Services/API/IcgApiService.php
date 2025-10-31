@@ -108,59 +108,72 @@ class IcgApiService
     /**
      * Obtener producto por SKU/Barcode
      */
-    public function getProductBySku($sku)
-    {
-        try {
-            $response = Http::withBasicAuth($this->username, $this->password)
-                ->timeout($this->timeout)
-                ->get($this->baseUrl, [
-                    'barcode' => $sku
-                ]);
+    public function getProductsBySkus(array $skus)
+{
+    try {
+        // Convertir array a string separado por comas
+        $skusString = implode(',', $skus);
+        
+        Log::info('ICG API Request - Multiple SKUs', [
+            'url' => $this->baseUrl,
+            'skus_count' => count($skus),
+            'skus' => $skusString
+        ]);
 
-            if (!$response->successful()) {
-                throw new \Exception("ICG API error: HTTP {$response->status()}");
-            }
-
-            $data = $response->json();
-            
-            if (!isset($data['success']) || !$data['success']) {
-                return [
-                    'success' => false,
-                    'error' => $data['error'] ?? 'Product not found',
-                    'data' => null
-                ];
-            }
-
-            $products = $data['products'] ?? [];
-
-            if (empty($products)) {
-                return [
-                    'success' => false,
-                    'error' => 'Product not found',
-                    'data' => null
-                ];
-            }
-
-            $product = $this->mapApiProductToWorkflowFormat($products[0]);
-
-            return [
-                'success' => true,
-                'data' => $product
-            ];
-
-        } catch (\Exception $e) {
-            Log::error('ICG API Error - Get by SKU', [
-                'sku' => $sku,
-                'message' => $e->getMessage()
+        $response = Http::withBasicAuth($this->username, $this->password)
+            ->timeout($this->timeout)
+            ->get($this->baseUrl, [
+                'barcode' => $skusString
             ]);
 
+        if (!$response->successful()) {
+            throw new \Exception("ICG API error: HTTP {$response->status()}");
+        }
+
+        $data = $response->json();
+        
+        if (!isset($data['success']) || !$data['success']) {
             return [
                 'success' => false,
-                'error' => $e->getMessage(),
-                'data' => null
+                'error' => $data['error'] ?? 'API returned success=false',
+                'data' => []
             ];
         }
+
+        $products = $data['products'] ?? [];
+        
+        // Mapear productos indexados por SKU
+        $mappedProducts = [];
+        foreach ($products as $apiProduct) {
+            if (isset($apiProduct['ArticuloId']) && $apiProduct['ArticuloId'] == -1) {
+                continue;
+            }
+            
+            $product = $this->mapApiProductToWorkflowFormat($apiProduct);
+            $sku = $product['ARTCOD'];
+            $mappedProducts[$sku] = $product;
+        }
+
+        return [
+            'success' => true,
+            'data' => $mappedProducts,
+            'total_requested' => count($skus),
+            'total_found' => count($mappedProducts),
+        ];
+
+    } catch (\Exception $e) {
+        Log::error('ICG API Error - Get by multiple SKUs', [
+            'skus_count' => count($skus),
+            'message' => $e->getMessage()
+        ]);
+
+        return [
+            'success' => false,
+            'error' => $e->getMessage(),
+            'data' => []
+        ];
     }
+}
 
     /**
      * Mapear producto de la API al formato que espera el workflow
