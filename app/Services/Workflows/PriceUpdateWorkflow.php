@@ -48,8 +48,11 @@ class PriceUpdateWorkflow extends BaseWorkflow
         $skus = $this->getSkus();
         $this->totalItems = count($skus);
 
-        $this->log('INFO', "Starting partial price update for {$this->totalItems} SKUs");
+        $this->log('INFO', "Page {$page} completed. Total processed: {$totalProcessed}");
 
+// Actualizar progreso
+$estimatedTotal = 12000; // Total aproximado de productos en ICG
+$this->updateProgress($totalProcessed, $estimatedTotal);
         foreach ($skus as $index => $sku) {
             try {
                 $this->updateProductPrice($sku);
