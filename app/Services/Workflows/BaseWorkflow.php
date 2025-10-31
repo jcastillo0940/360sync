@@ -111,20 +111,21 @@ abstract class BaseWorkflow
     /**
      * Actualizar progreso
      */
-    protected function updateProgress($current, $total)
-    {
-        $percentage = $total > 0 ? round(($current / $total) * 100, 2) : 0;
-        
-        $this->execution->update([
-            'total_items' => $total,
-            'success_count' => $this->successCount,
-            'failed_count' => $this->failedCount,
-            'skipped_count' => $this->skippedCount,
-        ]);
-        
-        $this->log('INFO', "Progress: {$current}/{$total} ({$percentage}%)");
-    }
+   protected function updateProgress($current, $total)
+{
+    $percentage = $total > 0 ? round(($current / $total) * 100, 2) : 0;
+    
+    $this->execution->update([
+        'total_items' => $total,
+        'processed_items' => $current,
+        'progress' => $percentage,
+        'success_count' => $this->successCount,
+        'failed_count' => $this->failedCount,
+        'skipped_count' => $this->skippedCount,
+    ]);
 
+    $this->log('INFO', "Progress: {$current}/{$total} ({$percentage}%) - Success: {$this->successCount}, Failed: {$this->failedCount}, Skipped: {$this->skippedCount}");
+}
     /**
      * Subir CSV a FTP
      */
