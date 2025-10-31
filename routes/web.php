@@ -25,8 +25,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/{id}/edit', [WorkflowController::class, 'edit'])->name('edit');
         Route::put('/{id}', [WorkflowController::class, 'update'])->name('update');
         Route::delete('/{id}', [WorkflowController::class, 'destroy'])->name('destroy');
-        Route::post('/{id}/execute', [WorkflowController::class, 'execute'])->name('execute');
+        Route::get('/{id}/execute', [WorkflowController::class, 'execute'])->name('execute');
+        Route::post('/{id}/process-execution', [WorkflowController::class, 'processExecution'])->name('process-execution');
         Route::post('/{id}/toggle', [WorkflowController::class, 'toggle'])->name('toggle');
+        Route::get('/{id}/stats', [WorkflowController::class, 'stats'])->name('stats');
+        Route::get('/{id}/info', [WorkflowController::class, 'getInfo'])->name('info');
     });
     
     Route::prefix('executions')->name('executions.')->group(function () {
@@ -35,8 +38,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/{id}/status', [ExecutionController::class, 'status'])->name('status');
         Route::post('/{id}/cancel', [ExecutionController::class, 'cancel'])->name('cancel');
         Route::post('/{id}/retry', [ExecutionController::class, 'retry'])->name('retry');
+        Route::delete('/{id}', [ExecutionController::class, 'destroy'])->name('destroy');
         Route::get('/{id}/logs', [ExecutionController::class, 'logs'])->name('logs');
         Route::get('/{id}/export', [ExecutionController::class, 'export'])->name('export');
+        Route::get('/{id}/download-csv', [ExecutionController::class, 'downloadCsv'])->name('download-csv');
     });
     
     Route::prefix('schedules')->name('schedules.')->group(function () {
@@ -78,7 +83,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/value/{key}', [ConfigurationController::class, 'getValue'])->name('value');
     });
     
-    // Rutas de Magento SKUs
     Route::prefix('magento-skus')->name('magento-skus.')->group(function () {
         Route::get('/', [MagentoSkuController::class, 'index'])->name('index');
         Route::post('/sync', [MagentoSkuController::class, 'sync'])->name('sync');
