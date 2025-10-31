@@ -7,22 +7,23 @@ use App\Models\MagentoSku;
 use App\Models\SyncConfiguration;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
 class SyncMagentoSkus extends Command
 {
     protected $signature = 'magento:sync-skus';
-    protected $description = 'Sync all SKUs from Magento to local database';
+    protected $description = 'Sync all SKUs with prices from Magento to local database';
 
     public function handle()
     {
-        $this->info('Starting Magento SKU synchronization...');
+        $this->info('Starting Magento SKU synchronization with prices...');
         
         try {
             $config = SyncConfiguration::getMagentoApiConfig();
             $magentoUrl = $config['base_url'];
             $magentoToken = $config['api_token'];
             
-            $allSkus = [];
+            $allProducts = [];
             $page = 1;
             $pageSize = 100;
             
@@ -36,39 +37,56 @@ class SyncMagentoSkus extends Command
                 ->get($magentoUrl . '/rest/V1/products', [
                     'searchCriteria[pageSize]' => $pageSize,
                     'searchCriteria[currentPage]' => $page,
-                    // ⭐ Filtro 1: Solo productos activos (status = 1)
                     'searchCriteria[filterGroups][0][filters][0][field]' => 'status',
                     'searchCriteria[filterGroups][0][filters][0][value]' => 1,
                     'searchCriteria[filterGroups][0][filters][0][condition_type]' => 'eq',
-                    // ⭐ Filtro 2: Solo productos visibles individualmente (visibility = 4)
                     'searchCriteria[filterGroups][1][filters][0][field]' => 'visibility',
                     'searchCriteria[filterGroups][1][filters][0][value]' => 4,
                     'searchCriteria[filterGroups][1][filters][0][condition_type]' => 'eq',
-                    'fields' => 'items[sku]'
+                    'fields' => 'items[sku,price,custom_attributes]'
                 ]);
                 
                 if (!$response->successful()) {
                     $this->error("Failed to fetch page {$page}");
                     break;
                 }
-                
+
                 $data = $response->json();
                 $items = $data['items'] ?? [];
                 
-                if (empty($items)) {
-                    $this->info("No more items found on page {$page}");
-                    break;
-                }
-                
                 foreach ($items as $item) {
                     if (isset($item['sku'])) {
-                        $allSkus[] = $item['sku'];
+                        $product = [
+                            'sku' => $item['sku'],
+                            'price' => $item['price'] ?? null,
+                            'special_price' => null,
+                            'special_from_date' => null,
+                            'special_to_date' => null
+                        ];
+
+                        // Extraer precios especiales de custom_attributes
+                        if (isset($item['custom_attributes'])) {
+                            foreach ($item['custom_attributes'] as $attr) {
+                                if ($attr['attribute_code'] === 'special_price') {
+                                    $product['special_price'] = $attr['value'];
+                                }
+                                if ($attr['attribute_code'] === 'special_from_date') {
+                                    $product['special_from_date'] = $attr['value'];
+                                }
+                                if ($attr['attribute_code'] === 'special_to_date') {
+                                    $product['special_to_date'] = $attr['value'];
+                                }
+                            }
+                        }
+
+                        $allProducts[] = $product;
                     }
                 }
+
+                $totalCount = $data['total_count'] ?? 0;
                 
-                $this->info("Fetched page {$page}: " . count($items) . " SKUs (Total so far: " . count($allSkus) . ")");
+                $this->info("Fetched page {$page}: " . count($items) . " products (Total so far: " . count($allProducts) . ")");
                 
-                // ⭐ Continuar mientras haya items
                 if (count($items) < $pageSize) {
                     $this->info("Last page reached (less than {$pageSize} items)");
                     break;
@@ -76,35 +94,23 @@ class SyncMagentoSkus extends Command
                 
                 $page++;
                 
-                // ⭐ Límite de seguridad
-                if ($page > 200) {
-                    $this->warn("Reached page limit (200). Stopping.");
-                    break;
-                }
-                
             } while (true);
             
-            $this->info("Total SKUs fetched: " . count($allSkus));
-            
-            if (empty($allSkus)) {
-                $this->warn("No SKUs found to sync");
-                return Command::SUCCESS;
-            }
+            $this->info("Total products fetched: " . count($allProducts));
             
             // Sincronizar a base de datos
             $this->info("Syncing to database...");
-            $synced = MagentoSku::syncFromMagento($allSkus);
+            $synced = MagentoSku::syncFromMagento($allProducts);
             
-            $this->info("✅ Successfully synced {$synced} SKUs to database");
+            $this->info("✅ Successfully synced {$synced} products with prices to database");
             
-            Log::info("Magento SKUs synchronized", [
-                'total_skus' => $synced,
+            Log::info("Magento SKUs and prices synchronized", [
+                'total_products' => $synced,
                 'synced_at' => now()
             ]);
             
             return Command::SUCCESS;
             
-
         } catch (\Exception $e) {
             $this->error("❌ Error: " . $e->getMessage());
             
