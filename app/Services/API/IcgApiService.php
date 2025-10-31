@@ -64,10 +64,8 @@ class IcgApiService
 
             $products = $data['products'] ?? [];
             
-            // Mapear productos al formato del workflow
             $mappedProducts = [];
             foreach ($products as $apiProduct) {
-                // Filtrar productos inválidos (ArticuloId = -1)
                 if (isset($apiProduct['ArticuloId']) && $apiProduct['ArticuloId'] == -1) {
                     continue;
                 }
@@ -75,8 +73,6 @@ class IcgApiService
                 $mappedProducts[] = $this->mapApiProductToWorkflowFormat($apiProduct);
             }
 
-            // La API de ICG NO devuelve totalRegistros/totalPaginas
-            // Así que asumimos que si devuelve menos productos que el límite, es la última página
             $isLastPage = count($products) < $perPage;
             
             return [
@@ -105,189 +101,199 @@ class IcgApiService
         }
     }
 
-    /**
-     * Obtener producto por SKU/Barcode
-     */
-    public function getProductsBySkus(array $skus)
-{
-    try {
-        // Convertir array a string separado por comas
-        $skusString = implode(',', $skus);
-        
-        Log::info('ICG API Request - Multiple SKUs', [
-            'url' => $this->baseUrl,
-            'skus_count' => count($skus),
-            'skus' => $skusString
-        ]);
+    public function getProductBySku($sku)
+    {
+        try {
+            $response = Http::withBasicAuth($this->username, $this->password)
+                ->timeout($this->timeout)
+                ->get($this->baseUrl, [
+                    'barcode' => $sku
+                ]);
 
-        $response = Http::withBasicAuth($this->username, $this->password)
-            ->timeout($this->timeout)
-            ->get($this->baseUrl, [
-                'barcode' => $skusString
+            if (!$response->successful()) {
+                throw new \Exception("ICG API error: HTTP {$response->status()}");
+            }
+
+            $data = $response->json();
+            
+            if (!isset($data['success']) || !$data['success']) {
+                return [
+                    'success' => false,
+                    'error' => $data['error'] ?? 'Product not found',
+                    'data' => null
+                ];
+            }
+
+            $products = $data['products'] ?? [];
+
+            if (empty($products)) {
+                return [
+                    'success' => false,
+                    'error' => 'Product not found',
+                    'data' => null
+                ];
+            }
+
+            $product = $this->mapApiProductToWorkflowFormat($products[0]);
+
+            return [
+                'success' => true,
+                'data' => $product
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('ICG API Error - Get by SKU', [
+                'sku' => $sku,
+                'message' => $e->getMessage()
             ]);
 
-        if (!$response->successful()) {
-            throw new \Exception("ICG API error: HTTP {$response->status()}");
-        }
-
-        $data = $response->json();
-        
-        if (!isset($data['success']) || !$data['success']) {
             return [
                 'success' => false,
-                'error' => $data['error'] ?? 'API returned success=false',
+                'error' => $e->getMessage(),
+                'data' => null
+            ];
+        }
+    }
+
+    public function getProductsBySkus(array $skus)
+    {
+        try {
+            $skusString = implode(',', $skus);
+            
+            Log::info('ICG API Request - Multiple SKUs', [
+                'url' => $this->baseUrl,
+                'skus_count' => count($skus),
+                'skus' => $skusString
+            ]);
+
+            $response = Http::withBasicAuth($this->username, $this->password)
+                ->timeout($this->timeout)
+                ->get($this->baseUrl, [
+                    'barcode' => $skusString
+                ]);
+
+            if (!$response->successful()) {
+                throw new \Exception("ICG API error: HTTP {$response->status()}");
+            }
+
+            $data = $response->json();
+            
+            if (!isset($data['success']) || !$data['success']) {
+                return [
+                    'success' => false,
+                    'error' => $data['error'] ?? 'API returned success=false',
+                    'data' => []
+                ];
+            }
+
+            $products = $data['products'] ?? [];
+            
+            $mappedProducts = [];
+            foreach ($products as $apiProduct) {
+                if (isset($apiProduct['ArticuloId']) && $apiProduct['ArticuloId'] == -1) {
+                    continue;
+                }
+                
+                $product = $this->mapApiProductToWorkflowFormat($apiProduct);
+                $sku = $product['ARTCOD'];
+                $mappedProducts[$sku] = $product;
+            }
+
+            return [
+                'success' => true,
+                'data' => $mappedProducts,
+                'total_requested' => count($skus),
+                'total_found' => count($mappedProducts),
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('ICG API Error - Get by multiple SKUs', [
+                'skus_count' => count($skus),
+                'message' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
                 'data' => []
             ];
         }
-
-        $products = $data['products'] ?? [];
-        
-        // Mapear productos indexados por SKU
-        $mappedProducts = [];
-        foreach ($products as $apiProduct) {
-            if (isset($apiProduct['ArticuloId']) && $apiProduct['ArticuloId'] == -1) {
-                continue;
-            }
-            
-            $product = $this->mapApiProductToWorkflowFormat($apiProduct);
-            $sku = $product['ARTCOD'];
-            $mappedProducts[$sku] = $product;
-        }
-
-        return [
-            'success' => true,
-            'data' => $mappedProducts,
-            'total_requested' => count($skus),
-            'total_found' => count($mappedProducts),
-        ];
-
-    } catch (\Exception $e) {
-        Log::error('ICG API Error - Get by multiple SKUs', [
-            'skus_count' => count($skus),
-            'message' => $e->getMessage()
-        ]);
-
-        return [
-            'success' => false,
-            'error' => $e->getMessage(),
-            'data' => []
-        ];
     }
-}
 
-    /**
-     * Mapear producto de la API al formato que espera el workflow
-     */
     protected function mapApiProductToWorkflowFormat($apiProduct)
-{
-    $sku = $apiProduct['Referencia'] ?? null;
-    
-    $prices = $apiProduct['Precios'] ?? [];
-    $price = 0;
-    $specialPrice = null;
-    $specialFromDate = null;
-    $specialToDate = null;
-    
-    // Buscar el precio de la tarifa 12
-    foreach ($prices as $priceData) {
-        if ($priceData['TarifaId'] == 12) {
-            $price = $priceData['Neto'] ?? 0;
-            $ofertaPrecio = $priceData['OfertaPrecio'] ?? 0;
-            
-            // ⭐ Solo procesar oferta si el precio es mayor a 0
-            if ($ofertaPrecio > 0) {
-                $ofertaDesde = $priceData['OfertaDesde'] ?? null;
-                $ofertaHasta = $priceData['OfertaHasta'] ?? null;
+    {
+        $sku = $apiProduct['Referencia'] ?? null;
+        
+        $prices = $apiProduct['Precios'] ?? [];
+        $price = 0;
+        $specialPrice = null;
+        $specialFromDate = null;
+        $specialToDate = null;
+        
+        foreach ($prices as $priceData) {
+            if ($priceData['TarifaId'] == 12) {
+                $price = $priceData['Neto'] ?? 0;
+                $ofertaPrecio = $priceData['OfertaPrecio'] ?? 0;
                 
-                // Verificar que las fechas no sean placeholder "1899-12-30"
-                if ($ofertaDesde && !str_starts_with($ofertaDesde, '1899') 
-                    && $ofertaHasta && !str_starts_with($ofertaHasta, '1899')) {
+                if ($ofertaPrecio > 0) {
+                    $ofertaDesde = $priceData['OfertaDesde'] ?? null;
+                    $ofertaHasta = $priceData['OfertaHasta'] ?? null;
                     
-                    try {
-                        $desde = Carbon::parse($ofertaDesde);
-                        $hasta = Carbon::parse($ofertaHasta)->endOfDay();
-                        $now = Carbon::now();
+                    if ($ofertaDesde && !str_starts_with($ofertaDesde, '1899') 
+                        && $ofertaHasta && !str_starts_with($ofertaHasta, '1899')) {
                         
-                        // ⭐ VALIDAR: La oferta debe estar activa HOY
-                        if ($now->between($desde, $hasta)) {
-                            $specialPrice = $ofertaPrecio;
-                            $specialFromDate = $desde->format('Y-m-d H:i:s');
-                            $specialToDate = $hasta->format('Y-m-d H:i:s');
+                        try {
+                            $desde = Carbon::parse($ofertaDesde);
+                            $hasta = Carbon::parse($ofertaHasta)->endOfDay();
+                            $now = Carbon::now();
+                            
+                            if ($now->between($desde, $hasta)) {
+                                $specialPrice = $ofertaPrecio;
+                                $specialFromDate = $desde->format('Y-m-d H:i:s');
+                                $specialToDate = $hasta->format('Y-m-d H:i:s');
+                            }
+                            
+                        } catch (\Exception $e) {
                         }
-                        // Si no está activa, dejar en null (se limpiará en Magento)
-                        
-                    } catch (\Exception $e) {
-                        // Fecha inválida, ignorar oferta
                     }
                 }
-            }
-            break;
-        }
-    }
-
-    $totalStock = 0;
-    foreach ($apiProduct['Stocks'] ?? [] as $stock) {
-        $totalStock += $stock['Disponible'] ?? 0;
-    }
-
-    $camposLibres = $apiProduct['Camposlibres'][0] ?? [];
-    
-    return [
-        'ARTCOD' => $sku,
-        'ARTDES' => $apiProduct['Descripcion'] ?? '',
-        'ARTOBSERV' => $apiProduct['Descripcion'] ?? '',
-        'PVPTARIF' => $price,
-        'PVPOFER' => $specialPrice,
-        'PVPOFER_DESDE' => $specialFromDate,
-        'PVPOFER_HASTA' => $specialToDate,
-        'EXISTEN' => $totalStock,
-        'PESO' => 0,
-        'ARTEAN' => $apiProduct['TallasColores'][0]['CodigoBarras1'] ?? '',
-        'Familia' => $apiProduct['Familia'] ?? '',
-        'Subfamilia' => $apiProduct['SubFamilia'] ?? '',
-        'WEBVISB' => $camposLibres['WEBVISB'] ?? 'F',
-        'APPLIEDSTOCK' => $camposLibres['APPLIEDSTOCK'] ?? 'T',
-        'MARCA' => $apiProduct['Marca'] ?? '',
-        'Departamento' => $apiProduct['Departamento'] ?? '',
-        'Seccion' => $apiProduct['Seccion'] ?? '',
-        'NIVEL1' => $camposLibres['NIVEL1'] ?? null,
-        'NIVEL2' => $camposLibres['NIVEL2'] ?? null,
-        'NIVEL3' => $camposLibres['NIVEL3'] ?? null,
-        'NIVEL4' => $camposLibres['NIVEL4'] ?? null,
-        'Stocks' => $apiProduct['Stocks'] ?? [],
-    ];
-}
-
-    /**
-     * Obtener múltiples productos por array de SKUs
-     */
-    public function getProductsBySkus(array $skus)
-    {
-        $products = [];
-        $errors = [];
-
-        foreach ($skus as $sku) {
-            $result = $this->getProductBySku($sku);
-            
-            if ($result['success']) {
-                $products[] = $result['data'];
-            } else {
-                $errors[$sku] = $result['error'];
+                break;
             }
         }
 
+        $totalStock = 0;
+        foreach ($apiProduct['Stocks'] ?? [] as $stock) {
+            $totalStock += $stock['Disponible'] ?? 0;
+        }
+
+        $camposLibres = $apiProduct['Camposlibres'][0] ?? [];
+        
         return [
-            'success' => count($errors) === 0,
-            'data' => $products,
-            'errors' => $errors,
-            'total_requested' => count($skus),
-            'total_found' => count($products),
+            'ARTCOD' => $sku,
+            'ARTDES' => $apiProduct['Descripcion'] ?? '',
+            'ARTOBSERV' => $apiProduct['Descripcion'] ?? '',
+            'PVPTARIF' => $price,
+            'PVPOFER' => $specialPrice,
+            'PVPOFER_DESDE' => $specialFromDate,
+            'PVPOFER_HASTA' => $specialToDate,
+            'EXISTEN' => $totalStock,
+            'PESO' => 0,
+            'ARTEAN' => $apiProduct['TallasColores'][0]['CodigoBarras1'] ?? '',
+            'Familia' => $apiProduct['Familia'] ?? '',
+            'Subfamilia' => $apiProduct['SubFamilia'] ?? '',
+            'WEBVISB' => $camposLibres['WEBVISB'] ?? 'F',
+            'APPLIEDSTOCK' => $camposLibres['APPLIEDSTOCK'] ?? 'T',
+            'MARCA' => $apiProduct['Marca'] ?? '',
+            'Departamento' => $apiProduct['Departamento'] ?? '',
+            'Seccion' => $apiProduct['Seccion'] ?? '',
+            'NIVEL1' => $camposLibres['NIVEL1'] ?? null,
+            'NIVEL2' => $camposLibres['NIVEL2'] ?? null,
+            'NIVEL3' => $camposLibres['NIVEL3'] ?? null,
+            'NIVEL4' => $camposLibres['NIVEL4'] ?? null,
+            'Stocks' => $apiProduct['Stocks'] ?? [],
         ];
     }
 
-    /**
-     * Test de conexión
-     */
     public function testConnection()
     {
         try {
@@ -309,9 +315,6 @@ class IcgApiService
         }
     }
 
-    /**
-     * Obtener estadísticas del catálogo
-     */
     public function getCatalogStats()
     {
         try {
