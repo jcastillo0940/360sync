@@ -66,116 +66,128 @@ class PriceUpdateWorkflow extends BaseWorkflow
      * Ejecución total (todos los productos)
      */
     protected function executeTotal()
-{
-    $this->log('INFO', 'Starting total price update');
+    {
+        $this->log('INFO', 'Starting total price update');
 
-    // Obtener TODOS los productos de magento_skus de una vez
-    $magentoProducts = MagentoSku::select('sku', 'price', 'special_price', 'special_from_date', 'special_to_date')
-        ->get()
-        ->keyBy('sku');
-    
-    $lastSync = MagentoSku::max('synced_at');
-    $this->log('INFO', 'Found ' . $magentoProducts->count() . ' SKUs in Magento (last sync: ' . ($lastSync ?? 'never') . ')');
-
-    if ($magentoProducts->isEmpty()) {
-        throw new \Exception('No SKUs found in local database. Please run: php artisan magento:sync-skus');
-    }
-
-    $skus = $magentoProducts->keys()->toArray();
-    $this->totalItems = count($skus);
-    
-    // Consultar ICG en lotes de 100 SKUs
-    $chunks = array_chunk($skus, 100);
-    $processedCount = 0;
-
-    foreach ($chunks as $chunkIndex => $skuChunk) {
-        $this->log('INFO', "Processing batch " . ($chunkIndex + 1) . "/" . count($chunks) . " (" . count($skuChunk) . " SKUs)");
+        // Obtener TODOS los productos de magento_skus de una vez
+        $magentoProducts = MagentoSku::select('sku', 'price', 'special_price', 'special_from_date', 'special_to_date')
+            ->get()
+            ->keyBy('sku');
         
-        $result = $this->icgApi->getProductsBySkus($skuChunk);
+        $lastSync = MagentoSku::max('synced_at');
+        $this->log('INFO', 'Found ' . $magentoProducts->count() . ' SKUs in Magento (last sync: ' . ($lastSync ?? 'never') . ')');
+
+        if ($magentoProducts->isEmpty()) {
+            throw new \Exception('No SKUs found in local database. Please run: php artisan magento:sync-skus');
+        }
+
+        $skus = $magentoProducts->keys()->toArray();
+        $this->totalItems = count($skus);
         
-        if ($result['success']) {
-            $icgProducts = $result['data'];
+        // Consultar ICG en lotes de 100 SKUs
+        $chunks = array_chunk($skus, 100);
+        $processedCount = 0;
+
+        foreach ($chunks as $chunkIndex => $skuChunk) {
+            $this->log('INFO', "Processing batch " . ($chunkIndex + 1) . "/" . count($chunks) . " (" . count($skuChunk) . " SKUs)");
             
-            foreach ($skuChunk as $sku) {
-                try {
-                    $icgProduct = $icgProducts[$sku] ?? null;
-                    $magentoProduct = $magentoProducts[$sku];
-                    
-                    if ($icgProduct) {
-                        $this->updateProductPriceOptimized($sku, $icgProduct, $magentoProduct);
-                    } else {
-                        $this->skippedCount++;
+            $result = $this->icgApi->getProductsBySkus($skuChunk);
+            
+            if ($result['success']) {
+                $icgProducts = $result['data'];
+                
+                foreach ($skuChunk as $sku) {
+                    try {
+                        $icgProduct = $icgProducts[$sku] ?? null;
+                        $magentoProduct = $magentoProducts[$sku];
+                        
+                        if ($icgProduct) {
+                            $this->updateProductPriceOptimized($sku, $icgProduct, $magentoProduct);
+                        } else {
+                            $this->skippedCount++;
+                        }
+                        
+                        $processedCount++;
+                        
+                        if ($processedCount % 100 === 0) {
+                            $this->updateProgress($processedCount, $this->totalItems);
+                        }
+                        
+                    } catch (\Exception $e) {
+                        $this->log('ERROR', "Error processing SKU {$sku}: " . $e->getMessage(), $sku);
+                        $this->failedCount++;
                     }
-                    
-                    $processedCount++;
-                    
-                    if ($processedCount % 100 === 0) {
-                        $this->updateProgress($processedCount, $this->totalItems);
-                    }
-                    
-                } catch (\Exception $e) {
-                    $this->log('ERROR', "Error processing SKU {$sku}: " . $e->getMessage(), $sku);
-                    $this->failedCount++;
                 }
             }
         }
+
+        $this->updateProgress($this->totalItems, $this->totalItems);
+        $this->log('INFO', "Total price update completed: {$processedCount} products processed");
     }
-
-    $this->updateProgress($this->totalItems, $this->totalItems);
-    $this->log('INFO', "Total price update completed: {$processedCount} products processed");
-}
-
-protected function updateProductPriceOptimized($sku, $icgProduct, $magentoProduct)
-{
-    $webVisb = $icgProduct['WEBVISB'] ?? 'F';
-    if (strtoupper($webVisb) !== 'T') {
-        $this->skippedCount++;
-        return;
-    }
-
-    $newPrice = (float) ($icgProduct['PVPTARIF'] ?? 0);
-    $newSpecialPrice = isset($icgProduct['PVPOFER']) && $icgProduct['PVPOFER'] > 0 
-        ? (float) $icgProduct['PVPOFER'] 
-        : null;
-    
-    $newSpecialFromDate = $icgProduct['PVPOFER_DESDE'] ?? null;
-    $newSpecialToDate = $icgProduct['PVPOFER_HASTA'] ?? null;
-
-    // Comparar con datos en memoria
-    if (!$this->hasRealPriceChangeInMemory($magentoProduct, $newPrice, $newSpecialPrice, $newSpecialFromDate, $newSpecialToDate)) {
-        $this->skippedCount++;
-        return;
-    }
-
-    $result = $this->magentoApi->updatePrice($sku, $newPrice, $newSpecialPrice, $newSpecialFromDate, $newSpecialToDate);
-
-    if ($result['success']) {
-        MagentoSku::updatePrice($sku, $newPrice, $newSpecialPrice, $newSpecialFromDate, $newSpecialToDate);
-        $this->log('SUCCESS', "Price updated for SKU {$sku}: €{$newPrice}", $sku);
-        $this->successCount++;
-    } else {
-        throw new \Exception($result['error'] ?? 'Unknown error');
-    }
-}
-
-protected function hasRealPriceChangeInMemory($magentoProduct, $newPrice, $newSpecialPrice, $newFromDate, $newToDate)
-{
-    if (abs($magentoProduct->price - $newPrice) > 0.01) return true;
-    if (abs(($magentoProduct->special_price ?? 0) - ($newSpecialPrice ?? 0)) > 0.01) return true;
-    
-    $oldFrom = $magentoProduct->special_from_date ? \Carbon\Carbon::parse($magentoProduct->special_from_date)->format('Y-m-d') : null;
-    $oldTo = $magentoProduct->special_to_date ? \Carbon\Carbon::parse($magentoProduct->special_to_date)->format('Y-m-d') : null;
-    $newFrom = $newFromDate ? \Carbon\Carbon::parse($newFromDate)->format('Y-m-d') : null;
-    $newTo = $newToDate ? \Carbon\Carbon::parse($newToDate)->format('Y-m-d') : null;
-    
-    if ($oldFrom !== $newFrom) return true;
-    if ($oldTo !== $newTo) return true;
-    
-    return false;
-}
 
     /**
-     * Actualizar precio de un producto
+     * Actualizar precio de un producto (versión optimizada para Total)
+     */
+    protected function updateProductPriceOptimized($sku, $icgProduct, $magentoProduct)
+    {
+        $webVisb = $icgProduct['WEBVISB'] ?? 'F';
+        if (strtoupper($webVisb) !== 'T') {
+            $this->skippedCount++;
+            return;
+        }
+
+        $newPrice = (float) ($icgProduct['PVPTARIF'] ?? 0);
+        $newSpecialPrice = isset($icgProduct['PVPOFER']) && $icgProduct['PVPOFER'] > 0 
+            ? (float) $icgProduct['PVPOFER'] 
+            : null;
+        
+        $newSpecialFromDate = $icgProduct['PVPOFER_DESDE'] ?? null;
+        $newSpecialToDate = $icgProduct['PVPOFER_HASTA'] ?? null;
+
+        // Comparar con datos en memoria
+        if (!$this->hasRealPriceChangeInMemory($magentoProduct, $newPrice, $newSpecialPrice, $newSpecialFromDate, $newSpecialToDate)) {
+            $this->skippedCount++;
+            return;
+        }
+
+        $result = $this->magentoApi->updatePrice($sku, $newPrice, $newSpecialPrice, $newSpecialFromDate, $newSpecialToDate);
+
+        if ($result['success']) {
+            MagentoSku::updatePrice($sku, $newPrice, $newSpecialPrice, $newSpecialFromDate, $newSpecialToDate);
+            
+            $priceInfo = "€{$newPrice}";
+            if ($newSpecialPrice) {
+                $priceInfo .= " (Special: €{$newSpecialPrice})";
+            }
+            
+            $this->log('SUCCESS', "Price updated for SKU {$sku}: {$priceInfo}", $sku);
+            $this->successCount++;
+        } else {
+            throw new \Exception($result['error'] ?? 'Unknown error');
+        }
+    }
+
+    /**
+     * Comparar precios en memoria sin DB query
+     */
+    protected function hasRealPriceChangeInMemory($magentoProduct, $newPrice, $newSpecialPrice, $newFromDate, $newToDate)
+    {
+        if (abs($magentoProduct->price - $newPrice) > 0.01) return true;
+        if (abs(($magentoProduct->special_price ?? 0) - ($newSpecialPrice ?? 0)) > 0.01) return true;
+        
+        $oldFrom = $magentoProduct->special_from_date ? Carbon::parse($magentoProduct->special_from_date)->format('Y-m-d') : null;
+        $oldTo = $magentoProduct->special_to_date ? Carbon::parse($magentoProduct->special_to_date)->format('Y-m-d') : null;
+        $newFrom = $newFromDate ? Carbon::parse($newFromDate)->format('Y-m-d') : null;
+        $newTo = $newToDate ? Carbon::parse($newToDate)->format('Y-m-d') : null;
+        
+        if ($oldFrom !== $newFrom) return true;
+        if ($oldTo !== $newTo) return true;
+        
+        return false;
+    }
+
+    /**
+     * Actualizar precio de un producto (versión para Partial)
      */
     protected function updateProductPrice($sku, $icgProduct = null)
     {
@@ -192,14 +204,12 @@ protected function hasRealPriceChangeInMemory($magentoProduct, $newPrice, $newSp
             $icgProduct = $result['data'];
         }
 
-        // Verificar WEBVISB
         $webVisb = $icgProduct['WEBVISB'] ?? 'F';
         if (strtoupper($webVisb) !== 'T') {
             $this->skippedCount++;
             return;
         }
 
-        // Obtener precios
         $price = (float) ($icgProduct['PVPTARIF'] ?? 0);
         $specialPrice = isset($icgProduct['PVPOFER']) && $icgProduct['PVPOFER'] > 0 
             ? (float) $icgProduct['PVPOFER'] 
@@ -208,31 +218,16 @@ protected function hasRealPriceChangeInMemory($magentoProduct, $newPrice, $newSp
         $specialFromDate = $icgProduct['PVPOFER_DESDE'] ?? null;
         $specialToDate = $icgProduct['PVPOFER_HASTA'] ?? null;
 
-        // Verificar si hay cambio real ANTES de actualizar Magento
-        if (!MagentoSku::hasRealPriceChange($sku, $price, $specialPrice, $specialFromDate, $specialToDate)) {
-            $this->skippedCount++;
-            return;
-        }
-
-        // Actualizar precio en Magento
         $result = $this->magentoApi->updatePrice($sku, $price, $specialPrice, $specialFromDate, $specialToDate);
 
         if ($result['success']) {
-            // Actualizar en tabla local
             MagentoSku::updatePrice($sku, $price, $specialPrice, $specialFromDate, $specialToDate);
-
+            
             $priceInfo = "€{$price}";
             if ($specialPrice) {
-                $priceInfo .= " (Special: €{$specialPrice}";
-                if ($specialFromDate && $specialToDate) {
-                    $fromDate = Carbon::parse($specialFromDate)->format('m/d');
-                    $toDate = Carbon::parse($specialToDate)->format('m/d');
-                    $priceInfo .= " from {$fromDate} to {$toDate}";
-                }
-                $priceInfo .= ")";
-            } else {
-                $priceInfo .= " (No active offer)";
+                $priceInfo .= " (Special: €{$specialPrice})";
             }
+            
             $this->log('SUCCESS', "Price updated for SKU {$sku}: {$priceInfo}", $sku);
             $this->successCount++;
         } else {
