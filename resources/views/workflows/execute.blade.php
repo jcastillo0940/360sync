@@ -16,7 +16,7 @@
         <p class="text-gray-600 mt-1">{{ $workflow->description }}</p>
     </div>
 
-    <form method="POST" action="{{ route('workflows.process', $workflow->id) }}" class="space-y-6">
+    <form method="POST" action="{{ route('workflows.execute', $workflow->id) }}" class="space-y-6">
         @csrf
 
         <!-- Step 1: Select Scope -->
