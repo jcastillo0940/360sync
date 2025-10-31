@@ -72,7 +72,8 @@ class PriceUpdateWorkflow extends BaseWorkflow
         // ⭐ Cargar SKUs desde tabla local
         $this->log('INFO', 'Loading SKUs from local database...');
         $magentoSkus = MagentoSku::getAllSkusArray();
-        $this->log('INFO', 'Found ' . count($magentoSkus) . ' SKUs in Magento (from local database)');
+        $lastSync = MagentoSku::max('synced_at');
+        $this->log('INFO', 'Found ' . count($magentoSkus) . ' SKUs in Magento (last sync: ' . ($lastSync ?? 'never') . ')');
 
         if (empty($magentoSkus)) {
             throw new \Exception('No SKUs found in local database. Please run: php artisan magento:sync-skus');
@@ -116,7 +117,7 @@ class PriceUpdateWorkflow extends BaseWorkflow
                         continue;
                     }
 
-                    // ⭐ OPTIMIZACIÓN 2: Filtrar en memoria (sin API calls)
+                    // ⭐ Filtrar en memoria (sin API calls)
                     if (!in_array($sku, $magentoSkus)) {
                         $this->skippedCount++;
                         continue;
@@ -149,11 +150,6 @@ class PriceUpdateWorkflow extends BaseWorkflow
             }
             
             $page++;
-            
-            //if ($page > 100) {
-                //$this->log('WARNING', 'Reached page limit (100). Stopping execution.');
-                //break;
-            //}
             
         } while (true);
 
@@ -247,20 +243,29 @@ class PriceUpdateWorkflow extends BaseWorkflow
 
         $tariffId = $config['tariff_id'] ?? 12;
 
-        // ⭐ Obtener precios y fechas de oferta
+        // Obtener precios y fechas de oferta
         $price = (float) ($icgProduct['PVPTARIF'] ?? 0);
         $specialPrice = isset($icgProduct['PVPOFER']) && $icgProduct['PVPOFER'] > 0 
             ? (float) $icgProduct['PVPOFER'] 
             : null;
         
-        // ⭐ Obtener fechas de oferta (si existen)
+        // Obtener fechas de oferta (si existen)
         $specialFromDate = $icgProduct['PVPOFER_DESDE'] ?? null;
         $specialToDate = $icgProduct['PVPOFER_HASTA'] ?? null;
 
-        // ⭐ Actualizar precio en Magento (con fechas)
+        // ⭐ OPTIMIZACIÓN: Verificar si hay cambio real ANTES de actualizar Magento
+        if (!MagentoSku::hasRealPriceChange($sku, $price, $specialPrice, $specialFromDate, $specialToDate)) {
+            $this->skippedCount++;
+            return;
+        }
+
+        // ⭐ Actualizar precio en Magento (solo si hay cambio)
         $result = $this->magentoApi->updatePrice($sku, $price, $specialPrice, $specialFromDate, $specialToDate);
 
         if ($result['success']) {
+            // ⭐ Actualizar en tabla local después de actualizar Magento
+            MagentoSku::updatePrice($sku, $price, $specialPrice, $specialFromDate, $specialToDate);
+
             $priceInfo = "€{$price}";
             if ($specialPrice) {
                 $priceInfo .= " (Special: €{$specialPrice}";
