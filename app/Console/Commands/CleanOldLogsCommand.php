@@ -3,31 +3,19 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use App\Models\SyncLog;
-use App\Models\ApiLog;
+use App\Models\ExecutionLog;
 use Carbon\Carbon;
 
 class CleanOldLogsCommand extends Command
 {
-    /**
-     * The name and signature of the console command.
-     */
-    protected $signature = 'logs:clean 
-                            {--days=30 : Número de días a mantener}
-                            {--type= : Tipo de log (sync, api, all)}';
+    protected $signature = 'logs:clean
+                            {--days=30 : Número de días a mantener}';
 
-    /**
-     * The console command description.
-     */
     protected $description = 'Limpiar logs antiguos del sistema';
 
-    /**
-     * Execute the console command.
-     */
     public function handle(): int
     {
         $days = (int) $this->option('days');
-        $type = $this->option('type') ?? 'all';
         
         $this->info("🧹 Limpiando logs más antiguos de {$days} días...");
         
@@ -35,25 +23,34 @@ class CleanOldLogsCommand extends Command
         $totalDeleted = 0;
 
         try {
-            // Limpiar SyncLogs
-            if ($type === 'sync' || $type === 'all') {
-                $syncDeleted = SyncLog::where('created_at', '<', $cutoffDate)->delete();
-                $totalDeleted += $syncDeleted;
-                $this->info("✓ Logs de sincronización eliminados: {$syncDeleted}");
-            }
+            // Limpiar ExecutionLogs de la BD
+            $execDeleted = ExecutionLog::where('logged_at', '<', $cutoffDate)->delete();
+            $totalDeleted += $execDeleted;
+            $this->info("✓ Logs de BD eliminados: {$execDeleted}");
 
-            // Limpiar ApiLogs
-            if ($type === 'api' || $type === 'all') {
-                $apiDeleted = ApiLog::where('created_at', '<', $cutoffDate)->delete();
-                $totalDeleted += $apiDeleted;
-                $this->info("✓ Logs de API eliminados: {$apiDeleted}");
+            // Limpiar archivos .log antiguos en storage/logs
+            $logPath = storage_path('logs');
+            $filesDeleted = 0;
+            
+            $files = glob($logPath . '/*.log');
+            foreach ($files as $file) {
+                if (is_file($file) && basename($file) !== 'laravel.log') {
+                    $fileTime = filemtime($file);
+                    if ($fileTime < $cutoffDate->timestamp) {
+                        unlink($file);
+                        $filesDeleted++;
+                    }
+                }
             }
+            
+            $this->info("✓ Archivos .log eliminados: {$filesDeleted}");
+            $totalDeleted += $filesDeleted;
 
             $this->newLine();
-            $this->info("✅ Total de logs eliminados: {$totalDeleted}");
+            $this->info("✅ Total eliminado: {$totalDeleted} registros/archivos");
             
             return Command::SUCCESS;
-
+            
         } catch (\Exception $e) {
             $this->error('❌ Error: ' . $e->getMessage());
             return Command::FAILURE;

@@ -24,7 +24,7 @@
         </a>
 
         <!-- Workflows -->
-        <div x-data="{ open: openMenu === 'workflows' || openMenu === 'executions' || openMenu === 'schedule' }">
+        <div x-data="{ open: openMenu === 'workflows' || openMenu === 'executions' || openMenu === 'schedules' }">
             <button @click="open = !open" 
                     class="w-full flex items-center justify-between px-4 py-3 rounded-lg transition text-white/70 hover:bg-white/5 hover:text-white">
                 <div class="flex items-center">
@@ -43,8 +43,8 @@
                    class="flex items-center px-4 py-2 rounded-lg text-sm transition {{ request()->routeIs('executions.*') ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white' }}">
                     Executions
                 </a>
-                <a href="{{ route('schedule.index') }}" 
-                   class="flex items-center px-4 py-2 rounded-lg text-sm transition {{ request()->routeIs('schedule.index') ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white' }}">
+                <a href="{{ route('schedules.index') }}" 
+                   class="flex items-center px-4 py-2 rounded-lg text-sm transition {{ request()->routeIs('schedules.index') ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white' }}">
                     Planning
                 </a>
                 <a href="{{ route('workflows.index') }}" 

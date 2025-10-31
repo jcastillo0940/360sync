@@ -150,10 +150,10 @@ class PriceUpdateWorkflow extends BaseWorkflow
             
             $page++;
             
-            if ($page > 100) {
-                $this->log('WARNING', 'Reached page limit (100). Stopping execution.');
-                break;
-            }
+            //if ($page > 100) {
+                //$this->log('WARNING', 'Reached page limit (100). Stopping execution.');
+                //break;
+            //}
             
         } while (true);
 
