@@ -145,8 +145,3 @@ class MagentoSku extends Model
         return count($products);
     }
 }
-```
-
-### **Commit message:**
-```
-feat: Add price comparison methods to MagentoSku model
