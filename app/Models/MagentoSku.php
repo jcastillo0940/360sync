@@ -57,37 +57,55 @@ class MagentoSku extends Model
     /**
      * Verificar si hay cambio real en el precio
      */
-    public static function hasRealPriceChange($sku, $newPrice, $newSpecialPrice = null, $newFromDate = null, $newToDate = null)
-    {
-        $current = static::where('sku', $sku)->first();
-
-        if (!$current) {
-            return true; // Si no existe, asumimos que hay cambio
-        }
-
-        // Comparar precio regular (con tolerancia de 0.01)
-        if (abs($current->price - $newPrice) > 0.01) {
-            return true;
-        }
-
-        // Comparar precio especial
-        $currentSpecial = $current->special_price;
-        if (abs(($newSpecialPrice ?? 0) - ($currentSpecial ?? 0)) > 0.01) {
-            return true;
-        }
-
-        // Comparar fechas de oferta
-        if ($newSpecialPrice) {
-            $currentFrom = $current->special_from_date ? $current->special_from_date->format('Y-m-d') : null;
-            $currentTo = $current->special_to_date ? $current->special_to_date->format('Y-m-d') : null;
-
-            if ($currentFrom != $newFromDate || $currentTo != $newToDate) {
-                return true;
-            }
-        }
-
-        return false;
+    public static function hasRealPriceChange($sku, $newPrice, $newSpecialPrice = null, $newSpecialFromDate = null, $newSpecialToDate = null)
+{
+    $existing = self::where('sku', $sku)->first();
+    
+    if (!$existing) {
+        return true; // Si no existe, es un cambio
     }
+
+    // Comparar precio regular (con tolerancia de 0.01)
+    if (abs($existing->price - $newPrice) > 0.01) {
+        return true;
+    }
+
+    // Comparar precio especial (con tolerancia de 0.01)
+    $existingSpecial = $existing->special_price ?? 0;
+    $newSpecial = $newSpecialPrice ?? 0;
+    
+    if (abs($existingSpecial - $newSpecial) > 0.01) {
+        return true;
+    }
+
+    // ⭐ Normalizar fechas a solo YYYY-MM-DD para comparación
+    $existingFrom = $existing->special_from_date 
+        ? \Carbon\Carbon::parse($existing->special_from_date)->format('Y-m-d')
+        : null;
+    
+    $existingTo = $existing->special_to_date 
+        ? \Carbon\Carbon::parse($existing->special_to_date)->format('Y-m-d')
+        : null;
+    
+    $newFrom = $newSpecialFromDate 
+        ? \Carbon\Carbon::parse($newSpecialFromDate)->format('Y-m-d')
+        : null;
+    
+    $newTo = $newSpecialToDate 
+        ? \Carbon\Carbon::parse($newSpecialToDate)->format('Y-m-d')
+        : null;
+
+    // Comparar fechas (solo la parte de fecha, sin horas)
+    if ($existingFrom !== $newFrom) {
+        return true;
+    }
+
+    if ($existingTo !== $newTo) {
+        return true;
+    }
+
+    return false; // No hay cambios reales
+}
 
     /**
      * Actualizar precio de un SKU en la tabla local
