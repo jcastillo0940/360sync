@@ -172,48 +172,45 @@ class ScheduleRuleController extends Controller
     }
 
     private function getScheduledExecutionsForDate($date, $scheduleRules)
-    {
-        $timeline = [];
+{
+    $timeline = [];
 
-        foreach ($scheduleRules as $rule) {
-            $shouldRunOnDate = false;
+    foreach ($scheduleRules as $rule) {
+        $shouldRunOnDate = false;
 
-            switch ($rule->frequency) {
-                case 'daily':
-                    $shouldRunOnDate = true;
-                    break;
+        switch ($rule->frequency) {
+            case 'daily':
+                $shouldRunOnDate = true;
+                break;
 
-                case 'weekly':
-                    $shouldRunOnDate = $date->dayOfWeekIso == $rule->day_of_week;
-                    break;
+            case 'weekly':
+                $shouldRunOnDate = $date->dayOfWeekIso == $rule->day_of_week;
+                break;
 
-                case 'monthly':
-                    $shouldRunOnDate = $date->day == $rule->day_of_month;
-                    break;
-            }
-
-            if ($shouldRunOnDate) {
-                $executionTime = Carbon::parse($date->format('Y-m-d') . ' ' . $rule->execution_time);
-
-                $timeline[] = [
-                    'id' => $rule->id,
-                    'name' => $rule->name,
-                    'workflow_name' => $rule->workflow->name,
-                    'workflow_color' => $rule->workflow->color,
-                    'execution_time' => $executionTime->format('H:i'),
-                    'execution_timestamp' => $executionTime->timestamp,
-                    'status' => $executionTime->isPast() ? 'executed' : 'programmed',
-                    'frequency' => $rule->frequency_description,
-                ];
-            }
+            case 'monthly':
+                $shouldRunOnDate = $date->day == $rule->day_of_month;
+                break;
         }
 
-        usort($timeline, function ($a, $b) {
-            return $a['execution_timestamp'] <=> $b['execution_timestamp'];
-        });
-
-        return $timeline;
+        if ($shouldRunOnDate) {
+            $executionTime = Carbon::parse($date->format('Y-m-d') . ' ' . $rule->execution_time);
+            $timeKey = $executionTime->format('H:i');
+            
+            if (!isset($timeline[$timeKey])) {
+                $timeline[$timeKey] = [];
+            }
+            
+            $timeline[$timeKey][] = [
+                'workflow' => $rule->workflow,
+                'schedule' => $rule,
+            ];
+        }
     }
+
+    ksort($timeline);
+
+    return $timeline;
+}
 
     public function getInfo($id)
     {
