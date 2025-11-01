@@ -87,99 +87,76 @@ class StockUpdateWorkflow extends BaseWorkflow
     }
 
     protected function executeTotal()
-    {
-        $this->log('INFO', 'Starting total stock update');
+{
+    $this->log('INFO', 'Starting total stock update');
 
-        // ⭐ Cargar SKUs desde tabla local
-        $this->log('INFO', 'Loading SKUs from database...');
-        $magentoSkus = MagentoSku::getAllSkusArray();
-        $this->log('INFO', 'Found ' . count($magentoSkus) . ' SKUs in Magento (from local database)');
+    $magentoSkus = MagentoSku::getAllSkusArray();
+    $this->log('INFO', 'Found ' . count($magentoSkus) . ' SKUs in Magento');
 
-        if (empty($magentoSkus)) {
-            throw new \Exception('No SKUs found in local database. Please run: php artisan magento:sync-skus');
-        }
-
-        $filters = $this->prepareDateFilters();
-        
-        if (!empty($filters)) {
-            $this->log('INFO', 'Using date filters', $filters);
-        }
-
-        $page = 1;
-        $perPage = 100;
-        $processedCount = 0;
-        $totalProcessed = 0;
-
-        do {
-            $this->log('INFO', "Fetching page {$page}...");
-            
-            $result = $this->icgApi->getProducts($page, $perPage, $filters);
-            
-            if (!$result['success']) {
-                throw new \Exception("Failed to fetch products from ICG: " . ($result['error'] ?? 'Unknown error'));
-            }
-
-            $products = $result['data'];
-            $productsCount = count($products);
-            
-            $this->log('INFO', "Page {$page}: {$productsCount} products retrieved from ICG");
-
-            if ($productsCount == 0) {
-                break;
-            }
-
-            foreach ($products as $product) {
-                try {
-                    $sku = $product['ARTCOD'] ?? null;
-                    
-                    if (!$sku) {
-                        $this->skippedCount++;
-                        continue;
-                    }
-
-                    // ⭐ OPTIMIZACIÓN 2: Filtrar en memoria (sin API calls)
-                    if (!in_array($sku, $magentoSkus)) {
-                        $this->skippedCount++;
-                        continue;
-                    }
-
-                    $webVisb = $product['WEBVISB'] ?? 'F';
-                    if (strtoupper($webVisb) !== 'T') {
-                        $this->skippedCount++;
-                        continue;
-                    }
-
-                    $this->updateProductStock($sku, $product);
-                    $processedCount++;
-                    $totalProcessed++;
-                    
-                    if ($processedCount % 10 === 0) {
-                        $this->log('INFO', "Processed {$totalProcessed} products so far...");
-                    }
-
-                } catch (\Exception $e) {
-                    $this->log('ERROR', "Error processing product {$sku}: " . $e->getMessage(), $sku);
-                    $this->failedCount++;
-                }
-            }
-
-            $this->log('INFO', "Page {$page} completed. Total processed: {$totalProcessed}");
-            
-            if ($result['is_last_page'] ?? false) {
-                break;
-            }
-            
-            $page++;
-            
-            //if ($page > 100) {
-              //  $this->log('WARNING', 'Reached page limit (100). Stopping execution.');
-                //break;
-           // }
-            
-        } while (true);
-
-        $this->log('INFO', "Total stock update completed: {$totalProcessed} products processed");
+    if (empty($magentoSkus)) {
+        throw new \Exception('No SKUs found. Run: php artisan magento:sync-skus');
     }
+
+    $this->totalItems = count($magentoSkus);
+    $processedCount = 0;
+
+    $page = 1;
+    $perPage = 100;
+
+    do {
+        $result = $this->icgApi->getProducts($page, $perPage, []);
+        
+        if (!$result['success']) {
+            throw new \Exception("ICG API error: " . ($result['error'] ?? 'Unknown'));
+        }
+
+        $products = $result['data'];
+        
+        if (empty($products)) {
+            break;
+        }
+
+        foreach ($products as $product) {
+            try {
+                $sku = $product['ARTCOD'] ?? null;
+                
+                if (!$sku || !in_array($sku, $magentoSkus)) {
+                    $this->skippedCount++;
+                    continue;
+                }
+
+                $webVisb = $product['WEBVISB'] ?? 'F';
+                if (strtoupper($webVisb) !== 'T') {
+                    $this->skippedCount++;
+                    continue;
+                }
+
+                $this->updateProductStock($sku, $product);
+                $processedCount++;
+                
+                if ($processedCount % 100 === 0) {
+                    $this->updateProgress($processedCount, $this->totalItems);
+                }
+
+            } catch (\Exception $e) {
+                $this->log('ERROR', "Error on SKU {$sku}: " . $e->getMessage(), $sku);
+                $this->failedCount++;
+            }
+        }
+
+        $this->log('INFO', "Page {$page} done. Processed: {$processedCount}");
+        
+        if ($result['is_last_page'] ?? false) {
+            break;
+        }
+        
+        $page++;
+        
+    } while (true);
+
+    $this->updateProgress($this->totalItems, $this->totalItems);
+    $this->log('INFO', "Total completed: {$processedCount} products");
+}
 
     protected function prepareDateFilters()
     {
