@@ -5,7 +5,7 @@
 @section('content')
 <div class="mb-6">
     <div class="flex items-center space-x-4">
-        <a href="{{ route('schedule.index') }}" class="text-gray-600 hover:text-gray-900">
+        <a href="{{ route('schedules.index') }}" class="text-gray-600 hover:text-gray-900">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
             </svg>
@@ -18,7 +18,7 @@
 </div>
 
 <div class="bg-white rounded-lg shadow">
-    <form action="{{ route('schedule.store') }}" method="POST" class="p-6 space-y-6">
+    <form action="{{ route('schedules.store') }}" method="POST" class="p-6 space-y-6">
         @csrf
 
         <!-- Workflow Selection -->
@@ -185,7 +185,7 @@
 
         <!-- Action Buttons -->
         <div class="flex justify-end space-x-4 pt-4 border-t">
-            <a href="{{ route('schedule.index') }}" class="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+            <a href="{{ route('schedules.index') }}" class="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
                 Cancel
             </a>
             <button type="submit" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
@@ -197,7 +197,6 @@
 
 @push('scripts')
 <script>
-    // Show/hide fields based on frequency
     document.getElementById('frequency').addEventListener('change', function() {
         const daysOfWeek = document.getElementById('daysOfWeek');
         const dayOfMonth = document.getElementById('dayOfMonth');
@@ -206,7 +205,6 @@
         dayOfMonth.style.display = this.value === 'monthly' ? 'block' : 'none';
     });
 
-    // Trigger on page load
     document.getElementById('frequency').dispatchEvent(new Event('change'));
 </script>
 @endpush
