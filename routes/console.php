@@ -91,3 +91,9 @@ Schedule::command('report:generate weekly')
 Schedule::call(function () {
     \Log::info('360Sync scheduler is running at ' . now());
 })->everyFiveMinutes();
+
+// Procesar workflows programados - Cada minuto
+Schedule::command('workflows:process-scheduled')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->runInBackground();
