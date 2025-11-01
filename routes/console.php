@@ -1,41 +1,14 @@
 <?php
-
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Artisan;
 
-/*
-|--------------------------------------------------------------------------
-| Console Routes / Scheduled Tasks
-|--------------------------------------------------------------------------
-*/
-
-// Inspirational quote command (ejemplo de Laravel)
 Artisan::command('inspire', function () {
     $this->comment(\Illuminate\Foundation\Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-/*
-|--------------------------------------------------------------------------
-| Scheduled Tasks - 360Sync
-|--------------------------------------------------------------------------
-*/
-
-// Limpiar logs antiguos - Diario a las 2:00 AM
-Schedule::command('logs:clean')
-    ->dailyAt('02:00')
-    ->timezone('America/Mexico_City')
-    ->runInBackground()
-    ->withoutOverlapping()
-    ->onSuccess(function () {
-        \Log::info('Old logs cleaned successfully');
-    })
-    ->onFailure(function () {
-        \Log::error('Failed to clean old logs');
-    });
-
-// Sincronizar SKUs de Magento - Diario a las 00:30
+// Sincronizar SKUs de Magento - 3 veces al día: 1 AM, 10 AM, 5 PM
 Schedule::command('magento:sync-skus')
-    ->dailyAt('00:30')
+    ->cron('0 1,10,17 * * *')
     ->timezone('America/Mexico_City')
     ->runInBackground()
     ->withoutOverlapping(120)
@@ -72,7 +45,20 @@ Schedule::command('magento:sync-product-counts')
         \Log::error('Failed to sync product counts');
     });
 
-// Limpiar trabajos fallidos antiguos - Semanal (Domingos a las 1:00 AM)
+// Limpiar logs antiguos - Diario a las 2:00 AM
+Schedule::command('logs:clean')
+    ->dailyAt('02:00')
+    ->timezone('America/Mexico_City')
+    ->runInBackground()
+    ->withoutOverlapping()
+    ->onSuccess(function () {
+        \Log::info('Old logs cleaned successfully');
+    })
+    ->onFailure(function () {
+        \Log::error('Failed to clean old logs');
+    });
+
+// Limpiar trabajos fallidos - Semanal (Domingos 1 AM)
 Schedule::command('queue:prune-failed --hours=168')
     ->weekly()
     ->sundays()
@@ -80,7 +66,7 @@ Schedule::command('queue:prune-failed --hours=168')
     ->timezone('America/Mexico_City')
     ->runInBackground();
 
-// Limpiar batches antiguos - Semanal (Domingos a las 1:30 AM)
+// Limpiar batches antiguos - Semanal (Domingos 1:30 AM)
 Schedule::command('queue:prune-batches --hours=168 --unfinished=72')
     ->weekly()
     ->sundays()
@@ -88,7 +74,7 @@ Schedule::command('queue:prune-batches --hours=168 --unfinished=72')
     ->timezone('America/Mexico_City')
     ->runInBackground();
 
-// Generar reporte semanal - Lunes a las 8:00 AM
+// Generar reporte semanal - Lunes 8 AM
 Schedule::command('report:generate weekly')
     ->weeklyOn(1, '08:00')
     ->timezone('America/Mexico_City')
@@ -101,7 +87,7 @@ Schedule::command('report:generate weekly')
         \Log::error('Failed to generate weekly report');
     });
 
-// Ping para mantener el sistema activo (opcional)
+// Ping cada 5 minutos
 Schedule::call(function () {
     \Log::info('360Sync scheduler is running at ' . now());
 })->everyFiveMinutes();
