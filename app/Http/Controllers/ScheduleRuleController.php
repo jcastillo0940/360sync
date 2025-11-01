@@ -9,21 +9,16 @@ use Carbon\Carbon;
 
 class ScheduleRuleController extends Controller
 {
-    /**
-     * Mostrar planning/timeline de reglas programadas
-     */
     public function index(Request $request)
     {
         $date = $request->get('date', now()->format('Y-m-d'));
         $selectedDate = Carbon::parse($date);
 
-        // Obtener todas las reglas activas
         $scheduleRules = ScheduleRule::with('workflow')
             ->enabled()
             ->orderBy('execution_time')
             ->get();
 
-        // Obtener todas las ejecuciones programadas para la fecha seleccionada
         $scheduledExecutions = $this->getScheduledExecutionsForDate($selectedDate, $scheduleRules);
 
         $workflows = Workflow::active()->get();
@@ -31,9 +26,6 @@ class ScheduleRuleController extends Controller
         return view('schedule.index', compact('scheduleRules', 'scheduledExecutions', 'selectedDate', 'workflows'));
     }
 
-    /**
-     * Mostrar lista de reglas de programación
-     */
     public function list(Request $request)
     {
         $search = $request->get('search');
@@ -52,9 +44,6 @@ class ScheduleRuleController extends Controller
         return view('schedule.list', compact('rules'));
     }
 
-    /**
-     * Mostrar formulario para crear regla
-     */
     public function create()
     {
         $workflows = Workflow::active()->get();
@@ -62,9 +51,6 @@ class ScheduleRuleController extends Controller
         return view('schedule.create', compact('workflows'));
     }
 
-    /**
-     * Guardar nueva regla
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -84,17 +70,13 @@ class ScheduleRuleController extends Controller
 
         $rule = ScheduleRule::create($validated);
 
-        // Calcular próxima ejecución
         $rule->calculateNextRun();
 
         return redirect()
-            ->route('schedule.list')
+            ->route('schedules.index')
             ->with('success', 'Regla de programación creada exitosamente');
     }
 
-    /**
-     * Mostrar formulario para editar regla
-     */
     public function edit($id)
     {
         $rule = ScheduleRule::with('workflow')->findOrFail($id);
@@ -103,9 +85,6 @@ class ScheduleRuleController extends Controller
         return view('schedule.edit', compact('rule', 'workflows'));
     }
 
-    /**
-     * Actualizar regla
-     */
     public function update(Request $request, $id)
     {
         $rule = ScheduleRule::findOrFail($id);
@@ -124,17 +103,13 @@ class ScheduleRuleController extends Controller
 
         $rule->update($validated);
 
-        // Recalcular próxima ejecución
         $rule->calculateNextRun();
 
         return redirect()
-            ->route('schedule.list')
+            ->route('schedules.index')
             ->with('success', 'Regla actualizada exitosamente');
     }
 
-    /**
-     * Activar/Desactivar regla
-     */
     public function toggle($id)
     {
         $rule = ScheduleRule::findOrFail($id);
@@ -147,27 +122,20 @@ class ScheduleRuleController extends Controller
             ->with('success', "Regla {$status} exitosamente");
     }
 
-    /**
-     * Eliminar regla
-     */
     public function destroy($id)
     {
         $rule = ScheduleRule::findOrFail($id);
         $rule->delete();
 
         return redirect()
-            ->route('schedule.list')
+            ->route('schedules.index')
             ->with('success', 'Regla eliminada exitosamente');
     }
 
-    /**
-     * Ejecutar regla manualmente ahora
-     */
     public function runNow($id)
     {
         $rule = ScheduleRule::with('workflow')->findOrFail($id);
 
-        // Crear ejecución
         $execution = \App\Models\Execution::create([
             'job_id' => 'job_' . \Illuminate\Support\Str::random(10),
             'workflow_id' => $rule->workflow_id,
@@ -181,20 +149,13 @@ class ScheduleRuleController extends Controller
             'configuration_snapshot' => $rule->workflow->configuration,
         ]);
 
-        // Marcar como ejecutada
         $rule->markAsExecuted();
-
-        // Disparar job
-        // dispatch(new ProcessWorkflowJob($execution));
 
         return redirect()
             ->route('executions.show', $execution->id)
             ->with('success', 'Regla ejecutada manualmente. Job ID: ' . $execution->job_id);
     }
 
-    /**
-     * Obtener timeline de ejecuciones (AJAX)
-     */
     public function timeline(Request $request)
     {
         $date = $request->get('date', now()->format('Y-m-d'));
@@ -210,9 +171,6 @@ class ScheduleRuleController extends Controller
         return response()->json($timeline);
     }
 
-    /**
-     * Obtener ejecuciones programadas para una fecha específica
-     */
     private function getScheduledExecutionsForDate($date, $scheduleRules)
     {
         $timeline = [];
@@ -250,7 +208,6 @@ class ScheduleRuleController extends Controller
             }
         }
 
-        // Ordenar por hora de ejecución
         usort($timeline, function ($a, $b) {
             return $a['execution_timestamp'] <=> $b['execution_timestamp'];
         });
@@ -258,9 +215,6 @@ class ScheduleRuleController extends Controller
         return $timeline;
     }
 
-    /**
-     * Obtener información de la regla (AJAX)
-     */
     public function getInfo($id)
     {
         $rule = ScheduleRule::with(['workflow', 'executions' => function ($query) {
