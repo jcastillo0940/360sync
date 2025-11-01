@@ -9,7 +9,7 @@
             <h1 class="text-2xl font-bold text-gray-900">Schedule & Planning</h1>
             <p class="text-gray-600 mt-1">Manage automated workflow schedules</p>
         </div>
-        <a href="{{ route('schedule.create') }}" class="btn btn-primary">
+        <a href="{{ route('schedules.create') }}" class="btn btn-primary">
             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
             </svg>
@@ -21,7 +21,7 @@
 <!-- Date Navigation -->
 <div class="bg-white rounded-lg shadow mb-6 p-4">
     <div class="flex items-center justify-between">
-        <a href="{{ route('schedule.index', ['date' => \Carbon\Carbon::parse($selectedDate)->subDay()->format('Y-m-d')]) }}" 
+        <a href="{{ route('schedules.index', ['date' => \Carbon\Carbon::parse($selectedDate)->subDay()->format('Y-m-d')]) }}" 
            class="btn btn-secondary">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -37,7 +37,7 @@
             </p>
         </div>
 
-        <a href="{{ route('schedule.index', ['date' => \Carbon\Carbon::parse($selectedDate)->addDay()->format('Y-m-d')]) }}" 
+        <a href="{{ route('schedules.index', ['date' => \Carbon\Carbon::parse($selectedDate)->addDay()->format('Y-m-d')]) }}" 
            class="btn btn-secondary">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -46,7 +46,7 @@
     </div>
 
     <div class="mt-4 text-center">
-        <a href="{{ route('schedule.index') }}" class="text-sm text-blue-600 hover:text-blue-800">
+        <a href="{{ route('schedules.index') }}" class="text-sm text-blue-600 hover:text-blue-800">
             Go to Today
         </a>
     </div>
@@ -98,7 +98,7 @@
                                                class="btn btn-sm btn-secondary">
                                                 View Workflow
                                             </a>
-                                            <a href="{{ route('schedule.edit', $execution['schedule']->id) }}" 
+                                            <a href="{{ route('schedules.edit', $execution['schedule']->id) }}" 
                                                class="btn btn-sm btn-secondary">
                                                 Edit Schedule
                                             </a>
@@ -171,19 +171,19 @@
                             @endif
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm space-x-2">
-                            <a href="{{ route('schedule.edit', $rule->id) }}" 
+                            <a href="{{ route('schedules.edit', $rule->id) }}" 
                                class="text-blue-600 hover:text-blue-800">
                                 Edit
                             </a>
                             
-                            <form method="POST" action="{{ route('schedule.toggle', $rule->id) }}" class="inline">
+                            <form method="POST" action="{{ route('schedules.toggle', $rule->id) }}" class="inline">
                                 @csrf
                                 <button type="submit" class="text-orange-600 hover:text-orange-800">
                                     {{ $rule->is_enabled ? 'Disable' : 'Enable' }}
                                 </button>
                             </form>
 
-                            <form method="POST" action="{{ route('schedule.destroy', $rule->id) }}" class="inline">
+                            <form method="POST" action="{{ route('schedules.destroy', $rule->id) }}" class="inline">
                                 @csrf
                                 @method('DELETE')
                                 <button type="submit" 
