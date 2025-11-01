@@ -66,65 +66,50 @@ class PriceUpdateWorkflow extends BaseWorkflow
      * Ejecución total (todos los productos)
      */
     protected function executeTotal()
-    {
-        $this->log('INFO', 'Starting total price update');
+{
+    $this->log('INFO', 'Starting total price update');
 
-        // Obtener TODOS los productos de magento_skus de una vez
-        $magentoProducts = MagentoSku::select('sku', 'price', 'special_price', 'special_from_date', 'special_to_date')
-            ->get()
-            ->keyBy('sku');
-        
-        $lastSync = MagentoSku::max('synced_at');
-        $this->log('INFO', 'Found ' . $magentoProducts->count() . ' SKUs in Magento (last sync: ' . ($lastSync ?? 'never') . ')');
+    $magentoProducts = MagentoSku::select('sku', 'price', 'special_price', 'special_from_date', 'special_to_date')
+        ->get()
+        ->keyBy('sku');
+    
+    $lastSync = MagentoSku::max('synced_at');
+    $this->log('INFO', 'Found ' . $magentoProducts->count() . ' SKUs in Magento (last sync: ' . ($lastSync ?? 'never') . ')');
 
-        if ($magentoProducts->isEmpty()) {
-            throw new \Exception('No SKUs found in local database. Please run: php artisan magento:sync-skus');
-        }
-
-        $skus = $magentoProducts->keys()->toArray();
-        $this->totalItems = count($skus);
-        
-        // Consultar ICG en lotes de 100 SKUs
-        $chunks = array_chunk($skus, 100);
-        $processedCount = 0;
-
-        foreach ($chunks as $chunkIndex => $skuChunk) {
-            $this->log('INFO', "Processing batch " . ($chunkIndex + 1) . "/" . count($chunks) . " (" . count($skuChunk) . " SKUs)");
-            
-            $result = $this->icgApi->getProductsBySkus($skuChunk);
-            
-            if ($result['success']) {
-                $icgProducts = $result['data'];
-                
-                foreach ($skuChunk as $sku) {
-                    try {
-                        $icgProduct = $icgProducts[$sku] ?? null;
-                        $magentoProduct = $magentoProducts[$sku];
-                        
-                        if ($icgProduct) {
-                            $this->updateProductPriceOptimized($sku, $icgProduct, $magentoProduct);
-                        } else {
-                            $this->skippedCount++;
-                        }
-                        
-                        $processedCount++;
-                        
-                        if ($processedCount % 100 === 0) {
-                            $this->updateProgress($processedCount, $this->totalItems);
-                        }
-                        
-                    } catch (\Exception $e) {
-                        $this->log('ERROR', "Error processing SKU {$sku}: " . $e->getMessage(), $sku);
-                        $this->failedCount++;
-                    }
-                }
-            }
-        }
-
-        $this->updateProgress($this->totalItems, $this->totalItems);
-        $this->log('INFO', "Total price update completed: {$processedCount} products processed");
+    if ($magentoProducts->isEmpty()) {
+        throw new \Exception('No SKUs found in local database. Please run: php artisan magento:sync-skus');
     }
 
+    $this->totalItems = $magentoProducts->count();
+    $processedCount = 0;
+
+    foreach ($magentoProducts as $sku => $magentoProduct) {
+        try {
+            $result = $this->icgApi->getProductBySku($sku);
+            
+            if ($result['success']) {
+                $icgProduct = $result['data'];
+                $this->updateProductPriceOptimized($sku, $icgProduct, $magentoProduct);
+            } else {
+                $this->skippedCount++;
+            }
+            
+            $processedCount++;
+            
+            if ($processedCount % 100 === 0) {
+                $this->updateProgress($processedCount, $this->totalItems);
+                $this->log('INFO', "Progress: {$processedCount}/{$this->totalItems} - Success: {$this->successCount}, Skipped: {$this->skippedCount}");
+            }
+            
+        } catch (\Exception $e) {
+            $this->log('ERROR', "Error processing SKU {$sku}: " . $e->getMessage(), $sku);
+            $this->failedCount++;
+        }
+    }
+
+    $this->updateProgress($this->totalItems, $this->totalItems);
+    $this->log('INFO', "Total price update completed: {$processedCount} products processed");
+}
     /**
      * Actualizar precio de un producto (versión optimizada para Total)
      */
